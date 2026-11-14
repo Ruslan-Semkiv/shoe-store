@@ -5,9 +5,10 @@ spring:
     servlet:
       load-on-startup: 1
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/shoe_store}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    # falls back to the postgres container's own variables (environment/.env)
+    url: ${DB_URL:jdbc:postgresql://${DB_HOST:localhost}:5432/${POSTGRES_DB:shoe_store}}
+    username: ${DB_USERNAME:${POSTGRES_USER:postgres}}
+    password: ${DB_PASSWORD:${POSTGRES_PASSWORD:postgres}}
   task:
     scheduling:
       pool:

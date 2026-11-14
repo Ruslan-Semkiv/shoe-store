@@ -1,0 +1,7 @@
+# only mvnw, .mvn, pom.xml and src are needed for the build
+target
+.git
+.idea
+*.iml
+environment
+HELP.md

@@ -1,15 +1,15 @@
 package com.shoesshop.com.service;
 
-import com.shoesshop.com.feign.PaymentProviderGateway;
-import com.shoesshop.com.feign.dto.ChargeRequest;
-import com.shoesshop.com.feign.dto.ChargeResponse;
-import com.shoesshop.com.enums.ChargeStatus;
-import com.shoesshop.com.exception.PaymentDeclinedException;
 import com.shoesshop.com.dto.response.PaymentResponseDto;
 import com.shoesshop.com.dto.response.PaymentStatusResponseDto;
 import com.shoesshop.com.entity.PaymentEntity;
+import com.shoesshop.com.enums.ChargeStatus;
 import com.shoesshop.com.enums.PaymentType;
+import com.shoesshop.com.exception.PaymentDeclinedException;
 import com.shoesshop.com.exception.PaymentNotFoundException;
+import com.shoesshop.com.feign.PaymentProviderGateway;
+import com.shoesshop.com.feign.dto.ChargeRequest;
+import com.shoesshop.com.feign.dto.ChargeResponse;
 import com.shoesshop.com.repository.PaymentJpaRepository;
 import java.time.Instant;
 import java.util.Optional;
@@ -39,7 +39,9 @@ public class PaymentService {
   private final PaymentProviderGateway paymentProvider;
   private final PaymentJpaRepository paymentRepository;
 
-  /** "Pay" button of a placed order. */
+  /**
+   * "Pay" button of a placed order.
+   */
   public PaymentResponseDto pay(UUID orderId, PaymentType paymentType) {
     PaymentEntity payment = paymentTxService.start(orderId, paymentType, Instant.now());
     return PaymentResponseDto.from(charge(payment));
@@ -67,7 +69,9 @@ public class PaymentService {
     charge(payment);
   }
 
-  /** Asks the provider about the payment and brings our record up to date with its answer. */
+  /**
+   * Asks the provider about the payment and brings our record up to date with its answer.
+   */
   public PaymentStatusResponseDto checkStatus(UUID paymentId) {
     PaymentEntity payment = paymentRepository.findById(paymentId).orElseThrow(
         () -> new PaymentNotFoundException("There is no payment with the id - " + paymentId));
@@ -92,6 +96,7 @@ public class PaymentService {
   private PaymentEntity charge(PaymentEntity payment) {
     ChargeRequest request = new ChargeRequest(payment.getOrderId(), payment.getAmount(),
         payment.getCurrency(), payment.getPaymentType());
+
     ChargeResponse charge;
     try {
       charge = paymentProvider.charge(payment.getId(), request);
