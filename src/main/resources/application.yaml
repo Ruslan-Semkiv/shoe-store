@@ -1,0 +1,45 @@
+spring:
+  application:
+    name: shoe-store
+  mvc:
+    servlet:
+      load-on-startup: 1
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/shoe_store}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:postgres}
+  task:
+    scheduling:
+      pool:
+        size: 2   # the payment job's provider calls must not delay the stock-hold release job
+
+
+shop:
+  cart:
+    hold-ttl: 15m           # hold lives this long after the last add / heartbeat
+    max-hold: 60m           # heartbeats can't extend past this (from the last explicit action)
+    cookie-max-age: 30d     # how long the browser remembers the cart
+    cookie-secure: false    # set true behind HTTPS
+    release-interval: PT30S # how often expired holds are freed
+    release-batch-size: 500
+    abandoned-after: 30d
+    cleanup-cron: "0 0 3 * * *"
+
+  payment:
+    base-url: ${PAYMENT_PROVIDER_URL:}  # required; the "local" profile points it at the built-in mock
+    connect-timeout: 1s
+    read-timeout: 2s          # a slower answer counts as a network failure and is retried
+    retry-base-delay: 200ms   # Feign retries wait 200ms, 400ms, 800ms, 1.6s, 3.2s
+    retry-multiplier: 2
+    max-retries: 5            # then the payment is saved as RETRY_PENDING for the job
+    retry-interval: PT30S     # how often PaymentRetryJob looks for due payments
+    job-base-delay: 1m        # job tries come 1m, 2m, 4m, 8m, 16m after each failure
+    max-job-attempts: 5       # then the payment is FAILED and the order cancelled
+    job-batch-size: 20
+    lease: 2m
+    mock:
+      enabled: false          # built-in fake provider; only the "local" profile turns it on
+      error-rate: 0.0
+      timeout-rate: 0.0
+      decline-rate: 0.0
+      timeout-sleep: 3s

@@ -1,0 +1,8 @@
+# Local development: the built-in fake payment provider instead of a real one.
+# Run with --spring.profiles.active=local (never in production: it charges nothing and
+# exposes /mock-provider/admin/*).
+shop:
+  payment:
+    base-url: http://localhost:${server.port:8080}/mock-provider
+    mock:
+      enabled: true
