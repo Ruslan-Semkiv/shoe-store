@@ -44,7 +44,7 @@ public class OrderService {
     return orderJpaRepository.findAllByStatusNot(OrderStatus.CART, pageable).map(mapper::toDto);
   }
 
-  public OrderResponseDto getById(UUID id){
+  public OrderResponseDto getById(UUID id) {
     OrderEntity entity = orderJpaRepository.findByIdAndStatusNot(id, OrderStatus.CART).orElseThrow(
         () -> new OrderNotFoundException("There is no order with the provided id - " + id));
     return mapper.toDto(entity);
@@ -56,8 +56,8 @@ public class OrderService {
    * All or nothing: one short item rolls the whole order back.
    */
   @Transactional
-  public OrderResponseDto createOrder(OrderRequestDto requestDto){
-    List<OrderLineRequestDto> orderLines =  requestDto.orderLines();
+  public OrderResponseDto createOrder(OrderRequestDto requestDto) {
+    List<OrderLineRequestDto> orderLines = requestDto.orderLines();
 
     Instant now = Instant.now();
     OrderEntity order = new OrderEntity();
@@ -135,7 +135,9 @@ public class OrderService {
         lines.stream().map(OrderLineEntity::getId).toList());
   }
 
-  /** Locks whatever the line is still missing (its hold may have expired), then sells it. */
+  /**
+   * Locks whatever the line is still missing (its hold may have expired), then sells it.
+   */
   private void sellHeldUnits(OrderLineEntity line) {
     UUID itemId = line.getItem().getId();
     int quantity = line.getQuantity();
@@ -152,7 +154,9 @@ public class OrderService {
     line.setReservedMaxUntil(null);
   }
 
-  /** Sum of unitPrice * quantity; null while any line has no price (items have no price yet). */
+  /**
+   * Sum of unitPrice * quantity; null while any line has no price (items have no price yet).
+   */
   private static Long total(List<OrderLineEntity> lines) {
     long total = 0;
     for (OrderLineEntity line : lines) {
@@ -172,7 +176,7 @@ public class OrderService {
    * would also delete the payment row, and a later charge would be lost.
    */
   @Transactional
-  public void removeOrder(UUID id){
+  public void removeOrder(UUID id) {
     // locked: a payment can't start for this order while it is being deleted
     OrderEntity order = orderJpaRepository.findLockedById(id).orElseThrow(
         () -> new OrderNotFoundException("There is no order with the provided id - " + id));
@@ -193,8 +197,24 @@ public class OrderService {
     orderJpaRepository.delete(order);
   }
 
+  @Transactional
+  public void cancelOrder(UUID orderId) {
+    OrderEntity order = orderJpaRepository.findLockedById(orderId).orElseThrow(
+        () -> new OrderNotFoundException("There is no order with the provided id - " + orderId));
+    order.setStatus(OrderStatus.PAYMENT_FAILED);
 
-  /** Runs in the caller's transaction (CartService). */
+    List<OrderLineEntity> orderLineEntities = orderLineRepository.findAllByOrderId(orderId);
+
+    for (OrderLineEntity line : orderLineEntities) {
+      itemRepository.restock(line.getItem().getId(), line.getQuantity());
+    }
+  }
+
+
+  /**
+   * Runs in the caller's transaction (CartService).
+   */
+  @Transactional
   public OrderEntity findOrCreateOrderCart(UUID orderId, Instant now) {
     OrderEntity order = orderId == null ? null
         : orderJpaRepository.findLockedByIdAndStatus(orderId, OrderStatus.CART).orElse(null);

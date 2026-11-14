@@ -4,24 +4,21 @@ import com.shoesshop.com.config.PaymentProperties;
 import com.shoesshop.com.entity.OrderEntity;
 import com.shoesshop.com.entity.OrderLineEntity;
 import com.shoesshop.com.entity.PaymentEntity;
-import com.shoesshop.com.enums.Currency;
 import com.shoesshop.com.enums.OrderStatus;
 import com.shoesshop.com.enums.PaymentStatus;
 import com.shoesshop.com.enums.PaymentType;
 import com.shoesshop.com.exception.OrderNotFoundException;
-import com.shoesshop.com.exception.PaymentConflictException;
 import com.shoesshop.com.exception.PaymentNotFoundException;
 import com.shoesshop.com.repository.ItemJpaRepository;
 import com.shoesshop.com.repository.OrderJpaRepository;
 import com.shoesshop.com.repository.OrderLineJpaRepository;
 import com.shoesshop.com.repository.PaymentJpaRepository;
+import com.shoesshop.com.service.payment.check.PaymentContext;
 import jakarta.transaction.Transactional;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -41,51 +38,28 @@ public class PaymentTxService {
 
   private final PaymentJpaRepository paymentRepository;
   private final OrderJpaRepository orderRepository;
-  private final OrderLineJpaRepository orderLineRepository;
-  private final ItemJpaRepository itemRepository;
+  private final OrderService orderService;
   private final PaymentProperties properties;
 
   /**
-   * Creates the PROCESSING payment of a placed order. {@code paymentType} null = the order's
-   * (chosen at checkout). 409 if the order can't be paid now.
+   * Saves the PROCESSING payment of an order that passed every
+   * {@link com.shoesshop.com.service.payment.check.PaymentCheck}. Joins the transaction of
+   * {@link com.shoesshop.com.service.payment.PaymentCommandService}, which holds the order lock.
    */
   @Transactional
-  public PaymentEntity start(UUID orderId, PaymentType paymentType, Instant now) {
-    OrderEntity order = orderRepository.findLockedById(orderId).orElseThrow(
-        () -> new OrderNotFoundException("There is no order with the provided id - " + orderId));
-
-    if (order.getStatus() != OrderStatus.PLACED) {
-      throw new PaymentConflictException(
-          "The order [" + orderId + "] is " + order.getStatus() + ", only PLACED orders are paid");
-    }
-    if (paymentRepository.existsByOrderIdAndStatusNot(orderId, PaymentStatus.DECLINED)) {
-      throw new PaymentConflictException(
-          "The order [" + orderId + "] already has a payment in progress");
-    }
-    Set<Currency> currencies = orderLineRepository.findAllByOrderId(orderId).stream()
-        .map(OrderLineEntity::getCurrency)
-        .collect(Collectors.toSet());
-    if (currencies.size() != 1) {
-      throw new PaymentConflictException(
-          "The order [" + orderId + "] must have lines in exactly one currency, has " + currencies);
-    }
-    if (order.getTotal() == null) {
-      throw new PaymentConflictException("The order [" + orderId + "] has no total to pay");
-    }
-    PaymentType type = paymentType != null ? paymentType : order.getPaymentType();
-    if (type == null) {
-      throw new PaymentConflictException(
-          "The order [" + orderId + "] has no payment type, send one with the payment");
-    }
+  public PaymentEntity start(PaymentContext context) {
+    OrderEntity order = context.order();
+    PaymentType type = context.paymentType();
+    Instant now = Instant.now();
 
     PaymentEntity payment = new PaymentEntity();
-    payment.setOrderId(orderId);
+    payment.setOrderId(order.getId());
     payment.setAmount(order.getTotal());
-    payment.setCurrency(currencies.iterator().next());
+    payment.setCurrency(context.currencies().iterator().next());
     payment.setPaymentType(type);
     payment.setStatus(PaymentStatus.PROCESSING);
     payment.setJobAttempts(0);
-    payment.setNextAttemptAt(now.plus(properties.lease()));
+    payment.setNextAttemptAt(now.plus(properties.lease())); // lease: the call below must finish by then
     payment.setCreatedAt(now);
     payment.setUpdatedAt(now);
     order.setPaymentType(type);
@@ -155,6 +129,7 @@ public class PaymentTxService {
   @Transactional
   public PaymentEntity markRetry(UUID paymentId, String error, Instant now) {
     PaymentEntity payment = lock(paymentId);
+
     if (payment.getStatus() != PaymentStatus.PROCESSING) {
       return payment;
     }
@@ -164,9 +139,10 @@ public class PaymentTxService {
     if (payment.getJobAttempts() >= properties.maxJobAttempts()) {
       log.warn("Payment {} failed after {} job attempts, cancelling order {}",
           paymentId, payment.getJobAttempts(), payment.getOrderId());
+
       payment.setStatus(PaymentStatus.FAILED);
       payment.setNextAttemptAt(null);
-      cancelOrder(payment.getOrderId());
+      orderService.cancelOrder(payment.getOrderId());
       return payment;
     }
 
@@ -177,14 +153,6 @@ public class PaymentTxService {
     return payment;
   }
 
-  private void cancelOrder(UUID orderId) {
-    OrderEntity order = orderRepository.findLockedById(orderId).orElseThrow(
-        () -> new OrderNotFoundException("There is no order with the provided id - " + orderId));
-    order.setStatus(OrderStatus.PAYMENT_FAILED);
-    for (OrderLineEntity line : orderLineRepository.findAllByOrderId(orderId)) {
-      itemRepository.restock(line.getItem().getId(), line.getQuantity());
-    }
-  }
 
   private PaymentEntity lock(UUID paymentId) {
     return paymentRepository.findLockedById(paymentId).orElseThrow(

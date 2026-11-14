@@ -4,6 +4,7 @@ import com.shoesshop.com.dto.request.PaymentRequestDto;
 import com.shoesshop.com.dto.response.PaymentResponseDto;
 import com.shoesshop.com.dto.response.PaymentStatusResponseDto;
 import com.shoesshop.com.service.PaymentService;
+import com.shoesshop.com.service.payment.PaymentCommandService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import java.util.UUID;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 public class PaymentController {
 
+  private final PaymentCommandService paymentCommandService;
   private final PaymentService paymentService;
 
   /**
@@ -34,7 +36,7 @@ public class PaymentController {
       @PathVariable @NotNull UUID orderId,
       @RequestBody @Valid PaymentRequestDto requestDto) {
 
-    PaymentResponseDto payment = paymentService.pay(orderId,requestDto.paymentType());
+    PaymentResponseDto payment = paymentCommandService.pay(orderId,requestDto.paymentType());
 
     HttpStatus status = switch (payment.status()) {
       case SUCCEEDED -> HttpStatus.CREATED;
