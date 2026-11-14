@@ -40,13 +40,15 @@ public class OrderService {
   private final PaymentJpaRepository paymentRepository;
 
   public Page<OrderResponseDto> getAll(Pageable pageable) {
-    // carts are customers' private baskets, reachable only through their cart_id cookie
     return orderJpaRepository.findAllByStatusNot(OrderStatus.CART, pageable).map(mapper::toDto);
   }
 
   public OrderResponseDto getById(UUID id) {
-    OrderEntity entity = orderJpaRepository.findByIdAndStatusNot(id, OrderStatus.CART).orElseThrow(
-        () -> new OrderNotFoundException("There is no order with the provided id - " + id));
+    OrderEntity entity = orderJpaRepository.findByIdAndStatusNot(id, OrderStatus.CART)
+        .orElseThrow(
+            () -> new OrderNotFoundException("There is no order with the provided id - " + id)
+        );
+
     return mapper.toDto(entity);
   }
 
@@ -135,38 +137,6 @@ public class OrderService {
         lines.stream().map(OrderLineEntity::getId).toList());
   }
 
-  /**
-   * Locks whatever the line is still missing (its hold may have expired), then sells it.
-   */
-  private void sellHeldUnits(OrderLineEntity line) {
-    UUID itemId = line.getItem().getId();
-    int quantity = line.getQuantity();
-
-    if (!orderLineService.restoreHold(line, Instant.now())
-        || itemRepository.commitReserved(itemId, quantity) == 0) {
-      throw new ItemStockNumberException(
-          "The item with provided id - [" + itemId + "], has not enough units in stock");
-    }
-    line.setUnitPrice(line.getItem().getPrice());
-    // sold now: the units left items.reserved_units in commitReserved
-    line.setReservedQuantity(0);
-    line.setReservedUntil(null);
-    line.setReservedMaxUntil(null);
-  }
-
-  /**
-   * Sum of unitPrice * quantity; null while any line has no price (items have no price yet).
-   */
-  private static Long total(List<OrderLineEntity> lines) {
-    long total = 0;
-    for (OrderLineEntity line : lines) {
-      if (line.getUnitPrice() == null) {
-        return null;
-      }
-      total += line.getUnitPrice() * line.getQuantity();
-    }
-    return total;
-  }
 
   /**
    * Cart order: its held units are released. Placed order: its sold units go back to stock
@@ -228,6 +198,41 @@ public class OrderService {
     }
     order.setLastSeenAt(now);
     return order;
+  }
+
+
+  /**
+   * Sum of unitPrice * quantity; null while any line has no price (items have no price yet).
+   */
+  private static Long total(List<OrderLineEntity> lines) {
+    long total = 0;
+    for (OrderLineEntity line : lines) {
+      if (line.getUnitPrice() == null) {
+        return null;
+      }
+      total += line.getUnitPrice() * line.getQuantity();
+    }
+    return total;
+  }
+
+
+  /**
+   * Locks whatever the line is still missing (its hold may have expired), then sells it.
+   */
+  private void sellHeldUnits(OrderLineEntity line) {
+    UUID itemId = line.getItem().getId();
+    int quantity = line.getQuantity();
+
+    if (!orderLineService.restoreHold(line, Instant.now())
+        || itemRepository.commitReserved(itemId, quantity) == 0) {
+      throw new ItemStockNumberException(
+          "The item with provided id - [" + itemId + "], has not enough units in stock");
+    }
+    line.setUnitPrice(line.getItem().getPrice());
+    // sold now: the units left items.reserved_units in commitReserved
+    line.setReservedQuantity(0);
+    line.setReservedUntil(null);
+    line.setReservedMaxUntil(null);
   }
 
 }

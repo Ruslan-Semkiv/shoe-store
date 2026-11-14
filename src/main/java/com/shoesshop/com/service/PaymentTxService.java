@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.hibernate.query.Order;
 import org.springframework.stereotype.Service;
 
 /**
@@ -88,21 +89,28 @@ public class PaymentTxService {
   @Transactional
   public PaymentEntity markSucceeded(UUID paymentId, String chargeId) {
     PaymentEntity payment = lock(paymentId);
+
     if (payment.getStatus() == PaymentStatus.FAILED) {
       log.error("Payment {} was charged ({}) after it had been given up and order {} cancelled:"
           + " it must be refunded", paymentId, chargeId, payment.getOrderId());
       payment.setExternalChargeId(chargeId);
       return payment;
     }
+
     if (payment.getStatus().isFinal()) {
       return payment;
     }
+
     payment.setStatus(PaymentStatus.SUCCEEDED);
     payment.setExternalChargeId(chargeId);
     payment.setNextAttemptAt(null);
     payment.setLastError(null);
     payment.setUpdatedAt(Instant.now());
-    orderRepository.getOrElseThrow(payment.getOrderId()).setStatus(OrderStatus.PAID);
+
+    OrderEntity order = orderRepository.getOrElseThrow(payment.getOrderId());
+    order.setStatus(OrderStatus.PAID);
+    orderRepository.save(order);
+
     return payment;
   }
 
@@ -147,7 +155,8 @@ public class PaymentTxService {
     }
 
     Duration delay = properties.jobBaseDelay().multipliedBy(
-        (long) Math.pow(properties.retryMultiplier(), payment.getJobAttempts()));
+        (long) Math.pow(properties.retryMultiplier(), payment.getJobAttempts())
+    );
     payment.setStatus(PaymentStatus.RETRY_PENDING);
     payment.setNextAttemptAt(now.plus(delay));
     return payment;
